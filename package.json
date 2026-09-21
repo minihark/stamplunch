@@ -1,0 +1,12 @@
+{
+  "name": "stamplunch",
+  "version": "1.0.0",
+  "description": "Stamplunch — Göteborg Stampgatan Office Lunch Decider & Map",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
