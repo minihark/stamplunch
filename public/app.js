@@ -1,16 +1,20 @@
 /**
  * Stamplunch — Application Controller
- * Handles GPS geolocation, distance calculations, interactive filtering,
- * the animated "Lunch Roulette" decider, Leaflet map integration, and Slack sharing.
+ * Handles live OpenStreetMap API data, GPS geolocation, distance calculations,
+ * interactive filtering (scope, walk time, cuisine), the animated "Lunch Roulette",
+ * Leaflet map visualization, and Slack/team proposal sharing.
  */
 
 (function () {
   let userCoords = null; // { lat, lng }
   let activeLocationMode = 'office'; // 'gps' or 'office'
+  let activeScope = 'all'; // 'all' or 'curated'
   let activeCategory = 'all';
   let maxWalkFilter = 999;
   let activeSearch = '';
   let currentView = 'cards'; // 'cards' or 'map'
+  let allRestaurants = [];
+  let isLoading = false;
   let leafletMap = null;
   let mapMarkers = [];
   let userMarker = null;
@@ -58,7 +62,38 @@
     return { lat: window.OFFICE_LOCATION.lat, lng: window.OFFICE_LOCATION.lng };
   }
 
-  // Initialize Geolocation
+  // Fetch live restaurants from /api/restaurants
+  async function loadRestaurants() {
+    const ref = getReferenceCoords();
+    const resultsCount = document.getElementById('results-count');
+    isLoading = true;
+    resultsCount.textContent = 'Hämtar live lunchställen...';
+
+    try {
+      const res = await fetch(`/api/restaurants?lat=${ref.lat}&lng=${ref.lng}&radius=1500`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (data && Array.isArray(data.restaurants) && data.restaurants.length > 0) {
+        allRestaurants = data.restaurants;
+        console.log(`Loaded ${allRestaurants.length} places (source: ${data.source})`);
+      } else {
+        throw new Error('Empty restaurant array');
+      }
+    } catch (err) {
+      console.warn('API error, falling back to local dataset:', err.message);
+      // Fallback to local curated
+      if (Array.isArray(window.RESTAURANTS)) {
+        allRestaurants = window.RESTAURANTS.map((r) => ({ ...r, isCurated: true }));
+      }
+    } finally {
+      isLoading = false;
+      renderList();
+      if (leafletMap) updateMap();
+    }
+  }
+
+  // Geolocation handling
   function initGeolocation() {
     const locStatus = document.getElementById('location-status');
     const locBtn = document.getElementById('btn-toggle-location');
@@ -68,7 +103,7 @@
       return;
     }
 
-    locStatus.textContent = '📍 Hämtar din position...';
+    locStatus.textContent = '📍 Söker din GPS-position...';
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -77,7 +112,6 @@
           lng: pos.coords.longitude
         };
 
-        // Check if user is roughly in Gothenburg (within ~30km)
         const distFromOffice = window.getDistanceMeters(
           userCoords.lat,
           userCoords.lng,
@@ -85,35 +119,37 @@
           window.OFFICE_LOCATION.lng
         );
 
-        if (distFromOffice < 35000) {
+        if (distFromOffice < 45000) {
           activeLocationMode = 'gps';
-          locStatus.textContent = `📍 Din GPS (${Math.round(pos.coords.accuracy)}m noggrannhet)`;
+          locStatus.textContent = `📍 Din GPS (~${Math.round(pos.coords.accuracy)}m)`;
           locBtn.classList.add('active');
+          document.getElementById('office-hint').textContent = 'Avstånd beräknas från din GPS-position';
         } else {
           activeLocationMode = 'office';
-          locStatus.textContent = '📍 Stampgatan 20 (Kontoret - du är utanför stan)';
+          locStatus.textContent = '📍 Stampgatan 20 (Kontoret)';
           locBtn.classList.remove('active');
+          document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
         }
 
-        renderList();
-        if (leafletMap) updateMap();
+        loadRestaurants();
       },
       (err) => {
-        console.log('Geolocation permission denied or timed out:', err);
+        console.log('GPS denied or unavailable:', err.message);
         activeLocationMode = 'office';
         locStatus.textContent = '📍 Stampgatan 20 (Kontoret)';
         locBtn.classList.remove('active');
-        renderList();
+        document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
+        loadRestaurants();
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
   }
 
-  // Filter and sort restaurants based on active criteria
+  // Filter and sort restaurants
   function getProcessedRestaurants() {
     const ref = getReferenceCoords();
 
-    const mapped = window.RESTAURANTS.map((r) => {
+    const mapped = allRestaurants.map((r) => {
       const dist = window.getDistanceMeters(ref.lat, ref.lng, r.lat, r.lng);
       const walkMin = window.getWalkMinutes(dist);
       return { ...r, distanceMeters: dist, walkMinutes: walkMin };
@@ -121,20 +157,26 @@
 
     return mapped
       .filter((r) => {
-        // Category
+        // Scope filter: all vs curated
+        if (activeScope === 'curated' && !r.isCurated) return false;
+
+        // Category filter
         if (activeCategory !== 'all' && r.category !== activeCategory) return false;
-        // Walk filter
-        if (r.walkMinutes > maxWalkFilter) return false;
-        // Text Search
+
+        // Walk time filter
+        if (maxWalkFilter !== 999 && r.walkMinutes > maxWalkFilter) return false;
+
+        // Text search
         if (activeSearch) {
           const q = activeSearch.toLowerCase();
           const match =
-            r.name.toLowerCase().includes(q) ||
-            r.cuisine.toLowerCase().includes(q) ||
-            r.signature.toLowerCase().includes(q) ||
-            r.address.toLowerCase().includes(q);
+            (r.name && r.name.toLowerCase().includes(q)) ||
+            (r.cuisine && r.cuisine.toLowerCase().includes(q)) ||
+            (r.signature && r.signature.toLowerCase().includes(q)) ||
+            (r.address && r.address.toLowerCase().includes(q));
           if (!match) return false;
         }
+
         return true;
       })
       .sort((a, b) => a.distanceMeters - b.distanceMeters);
@@ -145,14 +187,19 @@
     const container = document.getElementById('restaurant-grid');
     const spots = getProcessedRestaurants();
     const countBadge = document.getElementById('results-count');
-    countBadge.textContent = `${spots.length} ställen`;
+
+    if (activeScope === 'curated') {
+      countBadge.textContent = `${spots.length} kontorsfavoriter`;
+    } else {
+      countBadge.textContent = `${spots.length} ställen (Live OSM)`;
+    }
 
     if (spots.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
           <div class="empty-emoji">🍽️</div>
           <h3>Inga lunchställen matchade ditt filter</h3>
-          <p>Testa att öka gångavståndet eller välja en annan kategori.</p>
+          <p>Testa att öka gångavståndet, välja "Alla ställen" eller byta kökskategori.</p>
           <button id="btn-reset-filters" class="primary-btn">Återställ filter</button>
         </div>
       `;
@@ -163,9 +210,9 @@
     container.innerHTML = spots
       .map(
         (r) => `
-        <article class="spot-card" data-id="${r.id}">
+        <article class="spot-card ${r.isCurated ? 'curated' : ''}" data-id="${r.id}">
           <div class="spot-header">
-            <span class="spot-emoji">${r.emoji}</span>
+            <span class="spot-emoji">${r.emoji || '🍽️'}</span>
             <div class="spot-title-area">
               <h3 class="spot-name">${r.name}</h3>
               <div class="spot-sub">${r.cuisine} · ${r.address}</div>
@@ -176,12 +223,13 @@
             </div>
           </div>
 
-          <p class="spot-signature">“${r.signature}”</p>
+          <p class="spot-signature">“${r.signature || 'Dagens lunch och god mat nära Stampen'}”</p>
 
           <div class="spot-tags">
-            ${r.perks.map((p) => `<span class="tag">${p}</span>`).join('')}
-            <span class="tag price-tag">~${r.priceSEK} kr</span>
-            <span class="tag hours-tag">🕒 ${r.lunchHours}</span>
+            ${r.isCurated ? '<span class="tag curated-tag">⭐ Kontorsfavorit</span>' : '<span class="tag osm-tag">📍 Live OSM</span>'}
+            ${(r.perks || []).slice(0, 3).map((p) => `<span class="tag">${p}</span>`).join('')}
+            <span class="tag price-tag">~${r.priceSEK || 135} kr</span>
+            <span class="tag hours-tag">🕒 ${r.lunchHours || '11:00 - 14:00'}</span>
           </div>
 
           <div class="spot-actions">
@@ -191,10 +239,10 @@
               🚶 Hitta hit
             </a>
             <button class="btn-card-action btn-share-spot" data-id="${r.id}">
-              💬 Föreslå för teamet
+              💬 Föreslå
             </button>
-            <a href="${r.website}" target="_blank" rel="noopener noreferrer" class="btn-card-action btn-ghost">
-              🔗 Meny
+            <a href="${r.website || `https://www.google.com/search?q=${encodeURIComponent(r.name + ' Göteborg lunch')}`}" target="_blank" rel="noopener noreferrer" class="btn-card-action btn-ghost">
+              🔗 Info
             </a>
           </div>
         </article>
@@ -206,7 +254,7 @@
     document.querySelectorAll('.btn-share-spot').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         const id = e.currentTarget.dataset.id;
-        const spot = window.RESTAURANTS.find((s) => s.id === id);
+        const spot = allRestaurants.find((s) => s.id === id);
         if (spot) shareSpotWithTeam(spot);
       });
     });
@@ -219,7 +267,7 @@
     const dist = window.getDistanceMeters(ref.lat, ref.lng, spot.lat, spot.lng);
     const walk = window.getWalkMinutes(dist);
 
-    const shareText = `🍽️ Lunchförslag: ${spot.emoji} ${spot.name} (${spot.address})\n🚶 ${walk} minuters promenad (${dist}m)\n🍴 ${spot.signature}\n📍 Hitta hit: https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    const shareText = `🍽️ Lunchförslag: ${spot.emoji || '🍴'} ${spot.name} (${spot.address})\n🚶 ${walk} minuters promenad (${dist}m)\n🍴 ${spot.signature || spot.cuisine}\n📍 Hitta hit: https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
       spot.name + ' ' + spot.address + ' Göteborg'
     )}\n\nValt via Stamplunch: https://stamplunch.apps.harkco.se`;
 
@@ -230,7 +278,7 @@
       }).catch(() => {});
     } else {
       navigator.clipboard.writeText(shareText).then(() => {
-        showToast(`📋 Kopierade förslag för ${spot.name}! Klistra in i Slack/Teams.`);
+        showToast(`📋 Kopierade lunchförslag för ${spot.name}! Klistra in i Slack/Teams.`);
       });
     }
   }
@@ -249,7 +297,7 @@
   function openRouletteModal() {
     const candidates = getProcessedRestaurants();
     if (candidates.length === 0) {
-      showToast('Inga ställen matchar dina filter för tillfället!');
+      showToast('Inga ställen matchar dina filter just nu!');
       return;
     }
 
@@ -269,11 +317,11 @@
       spinBtn.disabled = true;
       let counter = 0;
       const totalSteps = 24;
-      let currentInterval = 45;
+      let currentInterval = 40;
 
       function step() {
         const randomChoice = candidates[Math.floor(Math.random() * candidates.length)];
-        spinnerSlot.innerHTML = `<span class="spin-emoji">${randomChoice.emoji}</span> <span class="spin-name">${randomChoice.name}</span>`;
+        spinnerSlot.innerHTML = `<span class="spin-emoji">${randomChoice.emoji || '🍽️'}</span> <span class="spin-name">${randomChoice.name}</span>`;
         playClick();
         if (navigator.vibrate) navigator.vibrate(20);
 
@@ -292,12 +340,13 @@
           resultBox.innerHTML = `
             <div class="winner-card">
               <div class="winner-badge">✨ Dagens Utvalda Lunch! ✨</div>
-              <div class="winner-emoji">${winner.emoji}</div>
+              <div class="winner-emoji">${winner.emoji || '🍽️'}</div>
               <h2 class="winner-name">${winner.name}</h2>
-              <div class="winner-meta">${winner.cuisine} · ${winner.walkMinutes} minuters promenad (${winner.distanceMeters}m)</div>
-              <p class="winner-signature">“${winner.signature}”</p>
+              <div class="winner-meta">${winner.cuisine} · ${winner.walkMinutes} min (${winner.distanceMeters}m)</div>
+              <p class="winner-signature">“${winner.signature || 'Dagens lunch nära Stampen'}”</p>
               <div class="winner-tags">
-                <span class="tag">~${winner.priceSEK} kr</span>
+                ${winner.isCurated ? '<span class="tag curated-tag">⭐ Kontorsfavorit</span>' : '<span class="tag osm-tag">📍 Live OSM</span>'}
+                <span class="tag price-tag">~${winner.priceSEK || 135} kr</span>
                 <span class="tag">${winner.address}</span>
               </div>
               <div class="winner-buttons">
@@ -330,11 +379,11 @@
     leafletMap = L.map('map-container', {
       zoomControl: false,
       attributionControl: false
-    }).setView([ref.lat, ref.lng], 16);
+    }).setView([ref.lat, ref.lng], 15);
 
     L.control.zoom({ position: 'topright' }).addTo(leafletMap);
 
-    // Dark CartoDB Matter tile layer
+    // Dark Matter tile layer
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19
     }).addTo(leafletMap);
@@ -370,7 +419,7 @@
     spots.forEach((r) => {
       const icon = L.divIcon({
         className: 'restaurant-map-pin',
-        html: `<div class="map-emoji-marker">${r.emoji}</div>`,
+        html: `<div class="map-emoji-marker ${r.isCurated ? 'curated' : ''}">${r.emoji || '🍽️'}</div>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16]
       });
@@ -379,9 +428,9 @@
         .addTo(leafletMap)
         .bindPopup(`
           <div class="map-popup">
-            <h4>${r.emoji} ${r.name}</h4>
+            <h4>${r.emoji || '🍽️'} ${r.name} ${r.isCurated ? '⭐' : ''}</h4>
             <div>${r.cuisine} · ${r.walkMinutes} min (${r.distanceMeters}m)</div>
-            <p>“${r.signature}”</p>
+            <p>“${r.signature || r.address}”</p>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
               r.name + ' ' + r.address + ' Göteborg'
             )}" target="_blank" class="popup-nav-link">🚶 Gå hit</a>
@@ -393,9 +442,12 @@
   }
 
   function resetFilters() {
+    activeScope = 'all';
     activeCategory = 'all';
     maxWalkFilter = 999;
     activeSearch = '';
+    document.querySelectorAll('.scope-pill').forEach((p) => p.classList.remove('active'));
+    document.querySelector('.scope-pill[data-scope="all"]')?.classList.add('active');
     document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
     document.querySelector('.filter-pill[data-category="all"]')?.classList.add('active');
     document.querySelectorAll('.walk-pill').forEach((p) => p.classList.remove('active'));
@@ -405,7 +457,7 @@
     if (leafletMap) updateMap();
   }
 
-  // Wire UI Controls
+  // Setup Event Listeners
   function setupEventListeners() {
     // Location toggle button
     document.getElementById('btn-toggle-location').addEventListener('click', function () {
@@ -415,10 +467,22 @@
       } else {
         activeLocationMode = 'office';
         document.getElementById('location-status').textContent = '📍 Stampgatan 20 (Kontoret)';
+        document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
         this.classList.remove('active');
+        loadRestaurants();
+      }
+    });
+
+    // Scope pills: All vs Curated
+    document.querySelectorAll('.scope-pill').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        playClick();
+        document.querySelectorAll('.scope-pill').forEach((b) => b.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        activeScope = e.currentTarget.dataset.scope;
         renderList();
         if (leafletMap) updateMap();
-      }
+      });
     });
 
     // Category pills
@@ -514,6 +578,9 @@
 
   // App Initialization
   setupEventListeners();
-  initGeolocation();
-  renderList();
+  loadRestaurants();
+  // Automatically check GPS location
+  if ('geolocation' in navigator) {
+    initGeolocation();
+  }
 })();

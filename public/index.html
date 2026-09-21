@@ -49,6 +49,15 @@
 
     <!-- Filter & Search Toolbar -->
     <section class="toolbar-section">
+      <!-- Source Scope Filter -->
+      <div class="filter-row">
+        <span class="filter-label">Urval:</span>
+        <div class="pills-group">
+          <button class="scope-pill active" data-scope="all">🌐 Alla ställen (200+ Live OSM)</button>
+          <button class="scope-pill" data-scope="curated">⭐ Kontorets favoriter</button>
+        </div>
+      </div>
+
       <!-- Search input & View Toggle -->
       <div class="search-row">
         <div class="search-box">
@@ -84,12 +93,13 @@
           <button class="filter-pill" data-category="nordic">🌿 Nordiskt & Buffé</button>
           <button class="filter-pill" data-category="husman">🥔 Husmanskost & Pub</button>
           <button class="filter-pill" data-category="italian">🍕 Italienskt</button>
+          <button class="filter-pill" data-category="cafe">☕ Kafé & Fika</button>
         </div>
       </div>
 
       <div class="results-header">
-        <span id="results-count" class="count-label">16 ställen</span>
-        <span class="office-hint">Avstånd beräknas från Stampgatan 20</span>
+        <span id="results-count" class="count-label">Laddar lunchställen...</span>
+        <span id="office-hint" class="office-hint">Beräknas från Stampgatan 20</span>
       </div>
     </section>
 
