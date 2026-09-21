@@ -3,30 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Stamplunch — Kontorets Lunchguide kring Stampgatan, Göteborg</title>
+  <title>Stamplunch — Kontorets Gastronomiska Lunchradar kring Stampgatan, Göteborg</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,800;1,9..144,600;1,9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Leaflet Map CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 </head>
-<body>
+<body class="stampen-theme">
+  <!-- Ambient background watermark / canal contour -->
+  <div class="bg-canal-glow"></div>
+
   <!-- Header Bar -->
   <header id="main-header">
     <div class="header-container">
       <div class="brand-block">
-        <span class="brand-icon">🍴</span>
-        <div>
-          <h1 class="brand-title">Stamplunch</h1>
-          <span class="brand-subtitle">Göteborg · Stampgatan / Stampen</span>
+        <!-- Tactile Postal / Stampen Mill Seal Icon -->
+        <div class="stamp-seal-badge" title="Stampen, Göteborg · Postdistrikt 411 01">
+          <div class="seal-text">STAMPEN</div>
+          <div class="seal-icon">🍴</div>
+          <div class="seal-sub">411 01</div>
+        </div>
+        <div class="brand-title-wrap">
+          <h1 class="brand-title">Stamp<em>lunch</em></h1>
+          <span class="brand-tagline">Stampgatan Office Gastro-Radar · Göteborg</span>
         </div>
       </div>
 
       <div class="header-location">
-        <div id="location-status" class="loc-badge">📍 Stampgatan 20 (Kontoret)</div>
-        <button id="btn-toggle-location" class="icon-btn" title="Växla mellan kontoret och din enhets GPS">
-          🎯 GPS
+        <div id="location-status" class="loc-badge">
+          <span class="pulse-beacon"></span>
+          <span id="loc-text">📍 Stampgatan 20 (Kontoret)</span>
+        </div>
+        <button id="btn-toggle-location" class="icon-btn" title="Växla mellan Stampgatan 20 och din GPS-position">
+          <span class="btn-gps-icon">🎯</span> GPS
         </button>
       </div>
     </div>
@@ -34,107 +45,183 @@
 
   <!-- Main Content Container -->
   <main class="main-container">
-    <!-- Hero Decision Section -->
+    <!-- Hero Decision / Lunch-Automat Section -->
     <section class="hero-decision-card">
+      <div class="hero-ticket-edge left"></div>
+      <div class="hero-ticket-edge right"></div>
+      
       <div class="hero-content">
-        <div class="hero-tag">BESLUTSÅNGEST VID 11:30?</div>
-        <h2 class="hero-heading">Vad ska vi käka idag?</h2>
-        <p class="hero-desc">Slumpa bland kontorets bästa lunchställen runt Stampgatan, Odinsplatsen och Friggagatan baserat på din gångtid.</p>
+        <div class="hero-badge-row">
+          <span class="editorial-kicker">KLASSIKER VID FATTIGHUSÅN & ODINSPLATSEN</span>
+          <span class="live-clock-badge" id="live-lunch-clock">🕒 Lunchtid</span>
+        </div>
+        <h2 class="hero-heading">Var ska kontoret käka <em>idag?</em></h2>
+        <p class="hero-desc">
+          Från snabba bao buns vid Stampbron och raggmunk på Friggagatan till över 240 live restauranger runt hörnet. Slumpa eller filtrera på gångminuter.
+        </p>
+
+        <!-- Quick discovery shortcut tags -->
+        <div class="quick-shortcuts">
+          <span class="quick-label">Snabba val:</span>
+          <button class="quick-chip" data-filter="urgent">⚡ Runt hörnet (&lt;3 min)</button>
+          <button class="quick-chip" data-filter="curated">⭐ Kontorsfavoriter</button>
+          <button class="quick-chip" data-filter="thai">🥢 Thai & Asiatiskt</button>
+          <button class="quick-chip" data-filter="burgers">🍔 Burgare</button>
+        </div>
       </div>
-      <button id="btn-hero-roulette" class="roulette-cta-btn">
-        <span class="cta-dice">🎲</span>
-        <span class="cta-text">Slumpa Lunch!</span>
-      </button>
+
+      <!-- Tactile Mechanical Lever / Roulette Button -->
+      <div class="roulette-cta-box">
+        <button id="btn-hero-roulette" class="roulette-cta-btn">
+          <div class="cta-inner">
+            <span class="cta-dice">🎲</span>
+            <div class="cta-text-group">
+              <span class="cta-title">SLUMPA LUNCH!</span>
+              <span class="cta-sub">Dra i lunch-automaten</span>
+            </div>
+          </div>
+          <div class="cta-shine"></div>
+        </button>
+      </div>
     </section>
 
     <!-- Filter & Search Toolbar -->
     <section class="toolbar-section">
-      <!-- Source Scope Filter -->
-      <div class="filter-row">
-        <span class="filter-label">Urval:</span>
-        <div class="pills-group">
-          <button class="scope-pill active" data-scope="all">🌐 Alla ställen (200+ Live OSM)</button>
-          <button class="scope-pill" data-scope="curated">⭐ Kontorets favoriter</button>
-        </div>
-      </div>
-
-      <!-- Search input & View Toggle -->
-      <div class="search-row">
-        <div class="search-box">
-          <span class="search-icon">🔍</span>
-          <input type="text" id="search-input" placeholder="Sök ställe, maträtt eller gata..." autocomplete="off">
+      <!-- Top Row: Source Scope & View Toggle -->
+      <div class="toolbar-top-row">
+        <div class="scope-group">
+          <button class="scope-pill active" data-scope="all">
+            <span class="pill-dot"></span> 🌐 Alla ställen <span class="scope-count" id="scope-all-count">240+</span>
+          </button>
+          <button class="scope-pill" data-scope="curated">
+            <span class="pill-dot gold"></span> ⭐ Kontorets favoriter <span class="scope-count">16</span>
+          </button>
         </div>
 
         <div class="view-toggle">
-          <button id="btn-view-cards" class="view-btn active">📋 Lista</button>
-          <button id="btn-view-map" class="view-btn">🗺️ Karta</button>
+          <button id="btn-view-cards" class="view-btn active" title="Matpass (Stora kort)">
+            🎟️ Matpass
+          </button>
+          <button id="btn-view-board" class="view-btn" title="Svarta Tavlan (Bistrolista)">
+            📋 Svarta Tavlan
+          </button>
+          <button id="btn-view-map" class="view-btn" title="Karta med spårvagnshållplatser">
+            🗺️ Karta
+          </button>
+        </div>
+      </div>
+
+      <!-- Search Box & Proximity Controls -->
+      <div class="search-row">
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Sök restaurang, maträtt, gata (t.ex. bao, smash, surdeg, Birria)..." autocomplete="off">
+          <button id="btn-clear-search" class="clear-search-btn" style="display: none;">✕</button>
         </div>
       </div>
 
       <!-- Distance Walk Filter -->
       <div class="filter-row">
-        <span class="filter-label">Gångtid:</span>
+        <span class="filter-label">🚶 Gångtid:</span>
         <div class="pills-group">
-          <button class="walk-pill active" data-max="999">Alla avstånd</button>
-          <button class="walk-pill" data-max="3">⚡ &lt; 3 min (Runt hörnet)</button>
-          <button class="walk-pill" data-max="6">🚶 &lt; 6 min (Stampen / Odins)</button>
+          <button class="walk-pill active" data-max="999">Hela området</button>
+          <button class="walk-pill" data-max="3">⚡ &lt; 3 min (Stampbron)</button>
+          <button class="walk-pill" data-max="6">🚶 &lt; 6 min (Odins / Svingeln)</button>
           <button class="walk-pill" data-max="10">🏃 &lt; 10 min (Friggagatan / Ullevi)</button>
         </div>
       </div>
 
       <!-- Cuisine Category Filter -->
       <div class="filter-row">
-        <span class="filter-label">Kök & Vibe:</span>
+        <span class="filter-label">🍴 Smak & Kök:</span>
         <div class="pills-group">
           <button class="filter-pill active" data-category="all">Alla smaker</button>
           <button class="filter-pill" data-category="asian">🥢 Asiatiskt & Thai</button>
-          <button class="filter-pill" data-category="streetfood">🌮 Street Food & Tacos</button>
+          <button class="filter-pill" data-category="streetfood">🌮 Tacos & Streetfood</button>
           <button class="filter-pill" data-category="burgers">🍔 Burgare</button>
           <button class="filter-pill" data-category="nordic">🌿 Nordiskt & Buffé</button>
           <button class="filter-pill" data-category="husman">🥔 Husmanskost & Pub</button>
-          <button class="filter-pill" data-category="italian">🍕 Italienskt</button>
+          <button class="filter-pill" data-category="italian">🍕 Italienskt & Pizza</button>
           <button class="filter-pill" data-category="cafe">☕ Kafé & Fika</button>
         </div>
       </div>
 
       <div class="results-header">
-        <span id="results-count" class="count-label">Laddar lunchställen...</span>
+        <div class="results-summary">
+          <span id="results-count" class="count-label">Laddar lunchställen...</span>
+          <span class="live-dot" title="Realtidsdata via OpenStreetMap">●</span>
+        </div>
         <span id="office-hint" class="office-hint">Beräknas från Stampgatan 20</span>
       </div>
     </section>
 
-    <!-- Restaurant Cards Grid -->
+    <!-- VIEW 1: Restaurant Cards Grid (Matpass) -->
     <section id="restaurant-grid" class="restaurant-grid">
       <!-- Injected dynamically by app.js -->
     </section>
 
-    <!-- Map View Container -->
+    <!-- VIEW 2: Svarta Tavlan (Bistro Blackboard List) -->
+    <section id="board-wrapper" class="board-wrapper" style="display: none;">
+      <div class="chalkboard-frame">
+        <div class="chalkboard-header">
+          <div class="chalk-title">📋 DAGENS LUNCH-TAVLA · STAMPEN</div>
+          <div class="chalk-subtitle">Klicka på en rad för vägbeskrivning och meny</div>
+        </div>
+        <div class="chalkboard-table-header">
+          <span class="col-name">Restaurang</span>
+          <span class="col-cuisine">Kök & Stil</span>
+          <span class="col-walk">Gångtid</span>
+          <span class="col-price">Pris</span>
+          <span class="col-actions">Åtgärd</span>
+        </div>
+        <div id="chalkboard-list" class="chalkboard-list">
+          <!-- Injected dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: Map View Container -->
     <section id="map-wrapper" class="map-wrapper" style="display: none;">
+      <div class="map-legend-bar">
+        <span class="legend-item"><span class="legend-pin gold">★</span> Kontorsfavorit</span>
+        <span class="legend-item"><span class="legend-pin blue">📍</span> Live-ställe (OSM)</span>
+        <span class="legend-item"><span class="legend-pin pulse">●</span> Din position</span>
+      </div>
       <div id="map-container"></div>
     </section>
   </main>
 
-  <!-- Interactive Lunch Roulette Modal -->
+  <!-- Interactive Vintage Lunch-Automat / Roulette Modal -->
   <div id="roulette-modal" class="modal-backdrop">
     <div class="modal-card">
       <button id="btn-close-modal" class="modal-close-btn" aria-label="Stäng modal">✕</button>
+      
       <div class="modal-header">
-        <h3 class="modal-title">🎲 Lunch-Roulette</h3>
-        <p class="modal-subtitle">Låt ödet avgöra dagens lunch!</p>
+        <div class="modal-pre">STAMPGATAN 20 · BESLUTS-MASKINEN</div>
+        <h3 class="modal-title">🎰 Lunch-Roulette</h3>
+        <p class="modal-subtitle">Låt slumpen avgöra vad vi äter till lunch idag!</p>
       </div>
 
-      <!-- Animated Roulette Slot -->
-      <div id="roulette-slot" class="roulette-slot">
-        🎲 Tryck på Snurra!
+      <!-- Animated Roulette Slot / Roller -->
+      <div class="slot-machine-casing">
+        <div class="slot-window">
+          <div id="roulette-slot" class="roulette-slot">
+            <span class="slot-idle-icon">🎲</span>
+            <span class="slot-idle-text">Tryck på spaken nedan för att snurra!</span>
+          </div>
+        </div>
       </div>
 
-      <!-- Final Winner Result -->
+      <!-- Final Winner Result (Styled like a stamped ticket receipt) -->
       <div id="roulette-result" class="roulette-result" style="display: none;">
         <!-- Injected on win -->
       </div>
 
       <div class="modal-actions">
-        <button id="btn-spin-now" class="primary-btn">🎲 Snurra hjulet!</button>
+        <button id="btn-spin-now" class="primary-btn spin-trigger-btn">
+          <span class="lever-knob">🎲</span>
+          <span class="spin-btn-label">SNURRA HJULET!</span>
+        </button>
       </div>
     </div>
   </div>

@@ -1,8 +1,6 @@
 /**
  * Stamplunch — Application Controller
- * Handles live OpenStreetMap API data, GPS geolocation, distance calculations,
- * interactive filtering (scope, walk time, cuisine), the animated "Lunch Roulette",
- * Leaflet map visualization, and Slack/team proposal sharing.
+ * Bespoke Gothenburg Gastro-Radar & Postal Lunch Decider
  */
 
 (function () {
@@ -12,7 +10,7 @@
   let activeCategory = 'all';
   let maxWalkFilter = 999;
   let activeSearch = '';
-  let currentView = 'cards'; // 'cards' or 'map'
+  let currentView = 'cards'; // 'cards', 'board', or 'map'
   let allRestaurants = [];
   let isLoading = false;
   let leafletMap = null;
@@ -21,40 +19,85 @@
 
   // Sound effects using Web Audio API
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  
   function playClick() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(600, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(120, audioCtx.currentTime + 0.05);
-    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.06);
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(540, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(140, audioCtx.currentTime + 0.04);
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    } catch(e) {}
   }
 
-  function playWin() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const now = audioCtx.currentTime;
-    [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+  function playStampThump() {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now + i * 0.07);
-      gain.gain.setValueAtTime(0.001, now + i * 0.07);
-      gain.gain.linearRampToValueAtTime(0.18, now + i * 0.07 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.07 + 0.35);
+      osc.frequency.setValueAtTime(160, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
-      osc.start(now + i * 0.07);
-      osc.stop(now + i * 0.07 + 0.4);
-    });
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.14);
+    } catch(e) {}
   }
 
-  // Determine active reference coordinate (GPS vs Office)
+  function playWinChime() {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const now = audioCtx.currentTime;
+      [440, 554.37, 659.25, 880].forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.08);
+        gain.gain.setValueAtTime(0.001, now + i * 0.08);
+        gain.gain.linearRampToValueAtTime(0.2, now + i * 0.08 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.4);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now + i * 0.08);
+        osc.stop(now + i * 0.08 + 0.45);
+      });
+    } catch(e) {}
+  }
+
+  // Update live lunch clock in hero
+  function updateLiveClock() {
+    const clockEl = document.getElementById('live-lunch-clock');
+    if (!clockEl) return;
+    const now = new Date();
+    const hrs = String(now.getHours()).padStart(2, '0');
+    const mins = String(now.getMinutes()).padStart(2, '0');
+    const timeStr = `${hrs}:${mins}`;
+    
+    let statusText = '🕒 Dags att välja lunch';
+    const totalMinutes = now.getHours() * 60 + now.getMinutes();
+    if (totalMinutes < 11 * 60) {
+      statusText = `🕒 ${timeStr} · Snart lunch!`;
+    } else if (totalMinutes <= 13 * 60 + 30) {
+      statusText = `🕒 ${timeStr} · Hög lunchtid!`;
+    } else if (totalMinutes <= 15 * 60) {
+      statusText = `🕒 ${timeStr} · Sen lunch`;
+    } else {
+      statusText = `🕒 ${timeStr} · Planera morgondagen`;
+    }
+    clockEl.textContent = statusText;
+  }
+
+  // Determine active reference coordinate (GPS vs Stampgatan Office)
   function getReferenceCoords() {
     if (activeLocationMode === 'gps' && userCoords) {
       return userCoords;
@@ -62,7 +105,16 @@
     return { lat: window.OFFICE_LOCATION.lat, lng: window.OFFICE_LOCATION.lng };
   }
 
-  // Fetch live restaurants from /api/restaurants
+  // Generate hyper-local Gothenburg landmark description
+  function getLandmarkContext(distMeters, walkMin) {
+    if (distMeters <= 220) return `👟 ${walkMin} min · Vid Stampbron (${distMeters}m)`;
+    if (distMeters <= 450) return `🚶 ${walkMin} min · Odinsplatsen (${distMeters}m)`;
+    if (distMeters <= 750) return `🚋 ${walkMin} min · Svingeln / Friggagatan (${distMeters}m)`;
+    if (distMeters <= 1100) return `🏟️ ${walkMin} min · Ullevi / Fattighusån (${distMeters}m)`;
+    return `🚶 ${walkMin} min · Centrum (${distMeters}m)`;
+  }
+
+  // Fetch live restaurants from backend
   async function loadRestaurants() {
     const ref = getReferenceCoords();
     const resultsCount = document.getElementById('results-count');
@@ -76,19 +128,19 @@
 
       if (data && Array.isArray(data.restaurants) && data.restaurants.length > 0) {
         allRestaurants = data.restaurants;
-        console.log(`Loaded ${allRestaurants.length} places (source: ${data.source})`);
+        const scopeCountEl = document.getElementById('scope-all-count');
+        if (scopeCountEl) scopeCountEl.textContent = allRestaurants.length;
       } else {
-        throw new Error('Empty restaurant array');
+        throw new Error('No places in response');
       }
     } catch (err) {
       console.warn('API error, falling back to local dataset:', err.message);
-      // Fallback to local curated
       if (Array.isArray(window.RESTAURANTS)) {
         allRestaurants = window.RESTAURANTS.map((r) => ({ ...r, isCurated: true }));
       }
     } finally {
       isLoading = false;
-      renderList();
+      renderAllViews();
       if (leafletMap) updateMap();
     }
   }
@@ -96,14 +148,15 @@
   // Geolocation handling
   function initGeolocation() {
     const locStatus = document.getElementById('location-status');
+    const locText = document.getElementById('loc-text');
     const locBtn = document.getElementById('btn-toggle-location');
 
     if (!('geolocation' in navigator)) {
-      locStatus.textContent = '📍 Stampgatan 20 (Kontoret)';
+      locText.textContent = '📍 Stampgatan 20 (Kontoret)';
       return;
     }
 
-    locStatus.textContent = '📍 Söker din GPS-position...';
+    locText.textContent = '📍 Söker din position...';
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
@@ -121,12 +174,12 @@
 
         if (distFromOffice < 45000) {
           activeLocationMode = 'gps';
-          locStatus.textContent = `📍 Din GPS (~${Math.round(pos.coords.accuracy)}m)`;
+          locText.textContent = `📍 Din GPS (~${Math.round(pos.coords.accuracy)}m)`;
           locBtn.classList.add('active');
           document.getElementById('office-hint').textContent = 'Avstånd beräknas från din GPS-position';
         } else {
           activeLocationMode = 'office';
-          locStatus.textContent = '📍 Stampgatan 20 (Kontoret)';
+          locText.textContent = '📍 Stampgatan 20 (Kontoret)';
           locBtn.classList.remove('active');
           document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
         }
@@ -134,9 +187,9 @@
         loadRestaurants();
       },
       (err) => {
-        console.log('GPS denied or unavailable:', err.message);
+        console.log('GPS unavailable:', err.message);
         activeLocationMode = 'office';
-        locStatus.textContent = '📍 Stampgatan 20 (Kontoret)';
+        locText.textContent = '📍 Stampgatan 20 (Kontoret)';
         locBtn.classList.remove('active');
         document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
         loadRestaurants();
@@ -157,16 +210,10 @@
 
     return mapped
       .filter((r) => {
-        // Scope filter: all vs curated
         if (activeScope === 'curated' && !r.isCurated) return false;
-
-        // Category filter
         if (activeCategory !== 'all' && r.category !== activeCategory) return false;
-
-        // Walk time filter
         if (maxWalkFilter !== 999 && r.walkMinutes > maxWalkFilter) return false;
 
-        // Text search
         if (activeSearch) {
           const q = activeSearch.toLowerCase();
           const match =
@@ -182,25 +229,32 @@
       .sort((a, b) => a.distanceMeters - b.distanceMeters);
   }
 
-  // Render the Restaurant Cards List
-  function renderList() {
-    const container = document.getElementById('restaurant-grid');
+  // Render both Card Grid and Blackboard View
+  function renderAllViews() {
     const spots = getProcessedRestaurants();
     const countBadge = document.getElementById('results-count');
 
     if (activeScope === 'curated') {
       countBadge.textContent = `${spots.length} kontorsfavoriter`;
     } else {
-      countBadge.textContent = `${spots.length} ställen (Live OSM)`;
+      countBadge.textContent = `${spots.length} ställen i närheten`;
     }
+
+    renderCards(spots);
+    renderBlackboard(spots);
+  }
+
+  // Render View 1: Matpass Card Grid
+  function renderCards(spots) {
+    const container = document.getElementById('restaurant-grid');
 
     if (spots.length === 0) {
       container.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-emoji">🍽️</div>
-          <h3>Inga lunchställen matchade ditt filter</h3>
-          <p>Testa att öka gångavståndet, välja "Alla ställen" eller byta kökskategori.</p>
-          <button id="btn-reset-filters" class="primary-btn">Återställ filter</button>
+        <div class="empty-state" style="grid-column: 1 / -1; padding: 48px 20px; text-align: center;">
+          <div style="font-size: 40px; margin-bottom: 12px;">🍽️</div>
+          <h3 style="font-family: var(--font-serif); font-size: 22px; color: #fff;">Inga lunchställen matchade ditt val</h3>
+          <p style="color: var(--text-muted); font-size: 14px; margin: 8px 0 16px 0;">Testa att öka gångavståndet eller välja "Alla ställen".</p>
+          <button id="btn-reset-filters" class="primary-btn" style="max-width: 200px; margin: 0 auto;">Återställ filter</button>
         </div>
       `;
       document.getElementById('btn-reset-filters')?.addEventListener('click', resetFilters);
@@ -208,46 +262,45 @@
     }
 
     container.innerHTML = spots
-      .map(
-        (r) => `
+      .map((r) => {
+        const landmark = getLandmarkContext(r.distanceMeters, r.walkMinutes);
+        return `
         <article class="spot-card ${r.isCurated ? 'curated' : ''}" data-id="${r.id}">
+          ${r.isCurated ? '<div class="rubber-stamp">★ STAMPEN VALD ★</div>' : ''}
+          
           <div class="spot-header">
-            <span class="spot-emoji">${r.emoji || '🍽️'}</span>
+            <div class="spot-emoji-token">${r.emoji || '🍽️'}</div>
             <div class="spot-title-area">
               <h3 class="spot-name">${r.name}</h3>
               <div class="spot-sub">${r.cuisine} · ${r.address}</div>
-            </div>
-            <div class="spot-distance-badge">
-              <span class="walk-min">${r.walkMinutes} min</span>
-              <span class="walk-meters">${r.distanceMeters}m</span>
+              <div class="spot-walk-landmark">${landmark}</div>
             </div>
           </div>
 
           <p class="spot-signature">“${r.signature || 'Dagens lunch och god mat nära Stampen'}”</p>
 
           <div class="spot-tags">
-            ${r.isCurated ? '<span class="tag curated-tag">⭐ Kontorsfavorit</span>' : '<span class="tag osm-tag">📍 Live OSM</span>'}
-            ${(r.perks || []).slice(0, 3).map((p) => `<span class="tag">${p}</span>`).join('')}
             <span class="tag price-tag">~${r.priceSEK || 135} kr</span>
             <span class="tag hours-tag">🕒 ${r.lunchHours || '11:00 - 14:00'}</span>
+            ${(r.perks || []).slice(0, 2).map((p) => `<span class="tag">${p}</span>`).join('')}
           </div>
 
           <div class="spot-actions">
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
               r.name + ' ' + r.address + ' Göteborg'
-            )}" target="_blank" rel="noopener noreferrer" class="btn-card-action">
+            )}" target="_blank" rel="noopener noreferrer" class="btn-card-action btn-primary-action">
               🚶 Hitta hit
             </a>
             <button class="btn-card-action btn-share-spot" data-id="${r.id}">
               💬 Föreslå
             </button>
-            <a href="${r.website || `https://www.google.com/search?q=${encodeURIComponent(r.name + ' Göteborg lunch')}`}" target="_blank" rel="noopener noreferrer" class="btn-card-action btn-ghost">
+            <a href="${r.website || `https://www.google.com/search?q=${encodeURIComponent(r.name + ' Göteborg lunch')}`}" target="_blank" rel="noopener noreferrer" class="btn-card-action">
               🔗 Info
             </a>
           </div>
         </article>
-      `
-      )
+      `;
+      })
       .join('');
 
     // Attach card event listeners
@@ -260,14 +313,60 @@
     });
   }
 
-  // Share proposal for team via Slack / Clipboard / Web Share
+  // Render View 2: Svarta Tavlan (Bistro Blackboard List)
+  function renderBlackboard(spots) {
+    const listEl = document.getElementById('chalkboard-list');
+    if (!listEl) return;
+
+    if (spots.length === 0) {
+      listEl.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: var(--text-dim); font-family: var(--font-mono);">
+          Tavlan är tom för det här filtret.
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = spots
+      .map(
+        (r) => `
+        <div class="chalkboard-row ${r.isCurated ? 'curated' : ''}">
+          <div class="col-name">
+            <span>${r.emoji || '🍴'}</span>
+            <strong>${r.name}</strong>
+            ${r.isCurated ? '<span style="color: var(--stamp-gold); font-size: 11px;">★</span>' : ''}
+          </div>
+          <div class="col-cuisine">${r.cuisine}</div>
+          <div class="col-walk">🚶 ${r.walkMinutes} min (${r.distanceMeters}m)</div>
+          <div class="col-price">~${r.priceSEK || 135} kr</div>
+          <div class="col-actions">
+            <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+              r.name + ' ' + r.address + ' Göteborg'
+            )}" target="_blank" class="chalk-btn">🚶 Gå</a>
+            <button class="chalk-btn btn-share-chalk" data-id="${r.id}">💬 Dela</button>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+
+    listEl.querySelectorAll('.btn-share-chalk').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const id = e.currentTarget.dataset.id;
+        const spot = allRestaurants.find((s) => s.id === id);
+        if (spot) shareSpotWithTeam(spot);
+      });
+    });
+  }
+
+  // Share proposal for team via Slack / Teams / Clipboard
   function shareSpotWithTeam(spot) {
     playClick();
     const ref = getReferenceCoords();
     const dist = window.getDistanceMeters(ref.lat, ref.lng, spot.lat, spot.lng);
     const walk = window.getWalkMinutes(dist);
 
-    const shareText = `🍽️ Lunchförslag: ${spot.emoji || '🍴'} ${spot.name} (${spot.address})\n🚶 ${walk} minuters promenad (${dist}m)\n🍴 ${spot.signature || spot.cuisine}\n📍 Hitta hit: https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    const shareText = `🍽️ Lunchförslag från Stamplunch:\n✨ ${spot.emoji || '🍴'} *${spot.name}* (${spot.address})\n🚶 ${walk} minuters promenad (${dist}m)\n🍴 ${spot.signature || spot.cuisine} (~${spot.priceSEK || 135} kr)\n🕒 Öppet: ${spot.lunchHours || '11:00 - 14:00'}\n📍 Karta & väg: https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
       spot.name + ' ' + spot.address + ' Göteborg'
     )}\n\nValt via Stamplunch: https://stamplunch.apps.harkco.se`;
 
@@ -278,12 +377,12 @@
       }).catch(() => {});
     } else {
       navigator.clipboard.writeText(shareText).then(() => {
-        showToast(`📋 Kopierade lunchförslag för ${spot.name}! Klistra in i Slack/Teams.`);
+        showToast(`📋 Kopierade förslag för ${spot.name}! Klistra in i Slack.`);
       });
     }
   }
 
-  // Toast Notification
+  // Toast notification
   function showToast(msg) {
     const toast = document.getElementById('toast');
     toast.textContent = msg;
@@ -309,10 +408,9 @@
     modal.classList.add('open');
     resultBox.style.display = 'none';
     spinnerSlot.style.display = 'flex';
-    spinnerSlot.textContent = '🎲 Tryck på Snurra!';
+    spinnerSlot.innerHTML = `<span class="slot-idle-icon">🎲</span> <span>Tryck för att snurra!</span>`;
     spinBtn.disabled = false;
 
-    // Spin animation logic
     spinBtn.onclick = () => {
       spinBtn.disabled = true;
       let counter = 0;
@@ -321,31 +419,36 @@
 
       function step() {
         const randomChoice = candidates[Math.floor(Math.random() * candidates.length)];
-        spinnerSlot.innerHTML = `<span class="spin-emoji">${randomChoice.emoji || '🍽️'}</span> <span class="spin-name">${randomChoice.name}</span>`;
+        spinnerSlot.innerHTML = `
+          <span class="spin-emoji">${randomChoice.emoji || '🍽️'}</span>
+          <span class="spin-name">${randomChoice.name}</span>
+        `;
         playClick();
         if (navigator.vibrate) navigator.vibrate(20);
 
         counter++;
         if (counter < totalSteps) {
-          currentInterval += 12; // Decelerate smoothly
+          currentInterval += 14;
           setTimeout(step, currentInterval);
         } else {
           // Final Winner Selected!
           const winner = candidates[Math.floor(Math.random() * candidates.length)];
           spinnerSlot.style.display = 'none';
           resultBox.style.display = 'block';
-          playWin();
-          if (navigator.vibrate) navigator.vibrate([60, 40, 100]);
+          playStampThump();
+          playWinChime();
+          if (navigator.vibrate) navigator.vibrate([80, 50, 120]);
+
+          const landmark = getLandmarkContext(winner.distanceMeters, winner.walkMinutes);
 
           resultBox.innerHTML = `
             <div class="winner-card">
-              <div class="winner-badge">✨ Dagens Utvalda Lunch! ✨</div>
+              <div class="winner-rubber-stamp">★ STÄMPLAD! ★</div>
               <div class="winner-emoji">${winner.emoji || '🍽️'}</div>
               <h2 class="winner-name">${winner.name}</h2>
-              <div class="winner-meta">${winner.cuisine} · ${winner.walkMinutes} min (${winner.distanceMeters}m)</div>
-              <p class="winner-signature">“${winner.signature || 'Dagens lunch nära Stampen'}”</p>
+              <div class="winner-meta">${winner.cuisine} · ${landmark}</div>
+              <p class="winner-signature">“${winner.signature || 'Dagens utvalda lunch vid Stampen'}”</p>
               <div class="winner-tags">
-                ${winner.isCurated ? '<span class="tag curated-tag">⭐ Kontorsfavorit</span>' : '<span class="tag osm-tag">📍 Live OSM</span>'}
                 <span class="tag price-tag">~${winner.priceSEK || 135} kr</span>
                 <span class="tag">${winner.address}</span>
               </div>
@@ -353,7 +456,7 @@
                 <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
                   winner.name + ' ' + winner.address + ' Göteborg'
                 )}" target="_blank" class="primary-btn">🚶 Navigera dit</a>
-                <button id="btn-share-winner" class="secondary-btn">💬 Dela med kollegorna</button>
+                <button id="btn-share-winner" class="secondary-btn">💬 Slacka teamet</button>
               </div>
             </div>
           `;
@@ -362,7 +465,7 @@
             shareSpotWithTeam(winner);
           });
 
-          spinBtn.textContent = '🔄 Snurra igen';
+          spinBtn.innerHTML = `<span class="lever-knob">🔄</span> <span>SNURRA IGEN</span>`;
           spinBtn.disabled = false;
         }
       }
@@ -394,7 +497,6 @@
   function updateMap() {
     if (!leafletMap) return;
 
-    // Clear old markers
     mapMarkers.forEach((m) => leafletMap.removeLayer(m));
     mapMarkers = [];
     if (userMarker) leafletMap.removeLayer(userMarker);
@@ -404,7 +506,7 @@
     // User / Office location pin
     const userIcon = L.divIcon({
       className: 'user-map-pin',
-      html: `<div class="pulse-dot"></div>`,
+      html: `<div class="pulse-beacon" style="width: 16px; height: 16px; background: #38bdf8; box-shadow: 0 0 12px #38bdf8;"></div>`,
       iconSize: [20, 20],
       iconAnchor: [10, 10]
     });
@@ -413,7 +515,6 @@
       .addTo(leafletMap)
       .bindPopup(`<b>${activeLocationMode === 'gps' ? 'Din GPS-position' : 'Stampgatan 20 (Kontoret)'}</b>`);
 
-    // Restaurant markers
     const spots = getProcessedRestaurants();
 
     spots.forEach((r) => {
@@ -428,7 +529,7 @@
         .addTo(leafletMap)
         .bindPopup(`
           <div class="map-popup">
-            <h4>${r.emoji || '🍽️'} ${r.name} ${r.isCurated ? '⭐' : ''}</h4>
+            <h4>${r.emoji || '🍽️'} ${r.name} ${r.isCurated ? '★' : ''}</h4>
             <div>${r.cuisine} · ${r.walkMinutes} min (${r.distanceMeters}m)</div>
             <p>“${r.signature || r.address}”</p>
             <a href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
@@ -453,24 +554,52 @@
     document.querySelectorAll('.walk-pill').forEach((p) => p.classList.remove('active'));
     document.querySelector('.walk-pill[data-max="999"]')?.classList.add('active');
     document.getElementById('search-input').value = '';
-    renderList();
+    document.getElementById('btn-clear-search').style.display = 'none';
+    renderAllViews();
     if (leafletMap) updateMap();
   }
 
-  // Setup Event Listeners
+  // Event Listeners
   function setupEventListeners() {
-    // Location toggle button
+    // Location toggle
     document.getElementById('btn-toggle-location').addEventListener('click', function () {
       playClick();
       if (activeLocationMode === 'office') {
         initGeolocation();
       } else {
         activeLocationMode = 'office';
-        document.getElementById('location-status').textContent = '📍 Stampgatan 20 (Kontoret)';
+        document.getElementById('loc-text').textContent = '📍 Stampgatan 20 (Kontoret)';
         document.getElementById('office-hint').textContent = 'Avstånd beräknas från Stampgatan 20';
         this.classList.remove('active');
         loadRestaurants();
       }
+    });
+
+    // Quick chips in hero
+    document.querySelectorAll('.quick-chip').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        playClick();
+        const f = e.currentTarget.dataset.filter;
+        if (f === 'urgent') {
+          maxWalkFilter = 3;
+          document.querySelectorAll('.walk-pill').forEach((p) => p.classList.remove('active'));
+          document.querySelector('.walk-pill[data-max="3"]')?.classList.add('active');
+        } else if (f === 'curated') {
+          activeScope = 'curated';
+          document.querySelectorAll('.scope-pill').forEach((p) => p.classList.remove('active'));
+          document.querySelector('.scope-pill[data-scope="curated"]')?.classList.add('active');
+        } else if (f === 'thai') {
+          activeCategory = 'asian';
+          document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
+          document.querySelector('.filter-pill[data-category="asian"]')?.classList.add('active');
+        } else if (f === 'burgers') {
+          activeCategory = 'burgers';
+          document.querySelectorAll('.filter-pill').forEach((p) => p.classList.remove('active'));
+          document.querySelector('.filter-pill[data-category="burgers"]')?.classList.add('active');
+        }
+        renderAllViews();
+        if (leafletMap) updateMap();
+      });
     });
 
     // Scope pills: All vs Curated
@@ -480,7 +609,7 @@
         document.querySelectorAll('.scope-pill').forEach((b) => b.classList.remove('active'));
         e.currentTarget.classList.add('active');
         activeScope = e.currentTarget.dataset.scope;
-        renderList();
+        renderAllViews();
         if (leafletMap) updateMap();
       });
     });
@@ -492,7 +621,7 @@
         document.querySelectorAll('.filter-pill').forEach((b) => b.classList.remove('active'));
         e.currentTarget.classList.add('active');
         activeCategory = e.currentTarget.dataset.category;
-        renderList();
+        renderAllViews();
         if (leafletMap) updateMap();
       });
     });
@@ -504,38 +633,57 @@
         document.querySelectorAll('.walk-pill').forEach((b) => b.classList.remove('active'));
         e.currentTarget.classList.add('active');
         maxWalkFilter = parseInt(e.currentTarget.dataset.max);
-        renderList();
+        renderAllViews();
         if (leafletMap) updateMap();
       });
     });
 
     // Search input
-    document.getElementById('search-input').addEventListener('input', (e) => {
+    const searchInput = document.getElementById('search-input');
+    const clearBtn = document.getElementById('btn-clear-search');
+    searchInput.addEventListener('input', (e) => {
       activeSearch = e.target.value.trim();
-      renderList();
+      clearBtn.style.display = activeSearch ? 'block' : 'none';
+      renderAllViews();
       if (leafletMap) updateMap();
     });
 
-    // View toggle (List vs Map)
-    document.getElementById('btn-view-cards').addEventListener('click', function () {
-      playClick();
-      currentView = 'cards';
-      this.classList.add('active');
-      document.getElementById('btn-view-map').classList.remove('active');
-      document.getElementById('restaurant-grid').style.display = 'grid';
-      document.getElementById('map-wrapper').style.display = 'none';
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      activeSearch = '';
+      clearBtn.style.display = 'none';
+      renderAllViews();
+      if (leafletMap) updateMap();
     });
 
-    document.getElementById('btn-view-map').addEventListener('click', function () {
+    // View toggles: Cards (Matpass), Board (Svarta Tavlan), Map (Karta)
+    const btnCards = document.getElementById('btn-view-cards');
+    const btnBoard = document.getElementById('btn-view-board');
+    const btnMap = document.getElementById('btn-view-map');
+    const elGrid = document.getElementById('restaurant-grid');
+    const elBoard = document.getElementById('board-wrapper');
+    const elMap = document.getElementById('map-wrapper');
+
+    function setActiveView(view) {
       playClick();
-      currentView = 'map';
-      this.classList.add('active');
-      document.getElementById('btn-view-cards').classList.remove('active');
-      document.getElementById('restaurant-grid').style.display = 'none';
-      document.getElementById('map-wrapper').style.display = 'block';
-      initMap();
-      setTimeout(() => leafletMap.invalidateSize(), 150);
-    });
+      currentView = view;
+      btnCards.classList.toggle('active', view === 'cards');
+      btnBoard.classList.toggle('active', view === 'board');
+      btnMap.classList.toggle('active', view === 'map');
+
+      elGrid.style.display = view === 'cards' ? 'grid' : 'none';
+      elBoard.style.display = view === 'board' ? 'block' : 'none';
+      elMap.style.display = view === 'map' ? 'block' : 'none';
+
+      if (view === 'map') {
+        initMap();
+        setTimeout(() => leafletMap && leafletMap.invalidateSize(), 150);
+      }
+    }
+
+    btnCards.addEventListener('click', () => setActiveView('cards'));
+    btnBoard.addEventListener('click', () => setActiveView('board'));
+    btnMap.addEventListener('click', () => setActiveView('map'));
 
     // Roulette modal triggers
     document.getElementById('btn-hero-roulette').addEventListener('click', () => {
@@ -552,34 +700,13 @@
         e.target.classList.remove('open');
       }
     });
-
-    // Shake to Decide (Mobile Accelerometer)
-    if (window.DeviceMotionEvent) {
-      let lastX, lastY, lastZ;
-      let lastTime = 0;
-      window.addEventListener('devicemotion', (e) => {
-        const acc = e.accelerationIncludingGravity;
-        if (!acc) return;
-        const curTime = Date.now();
-        if (curTime - lastTime > 150) {
-          const diffTime = curTime - lastTime;
-          lastTime = curTime;
-          const speed = Math.abs(acc.x + acc.y + acc.z - (lastX + lastY + lastZ)) / diffTime * 10000;
-          if (speed > 1800) {
-            openRouletteModal();
-          }
-          lastX = acc.x;
-          lastY = acc.y;
-          lastZ = acc.z;
-        }
-      });
-    }
   }
 
   // App Initialization
   setupEventListeners();
+  updateLiveClock();
+  setInterval(updateLiveClock, 30000);
   loadRestaurants();
-  // Automatically check GPS location
   if ('geolocation' in navigator) {
     initGeolocation();
   }
